@@ -1,229 +1,290 @@
-// =====================
-// Explora Marte - Phaser Quiz (MVP)
-// =====================
+// =============================================
+// Marte Runner (tipo Mario) - Phaser 3
+// - Plataformas + salto
+// - Mapa grande (world bounds)
+// - Cámara sigue al jugador
+// - Sin assets externos: texturas procedurales
+// =============================================
 
-const QUESTIONS = [
-  {
-    q: "¿Por qué Marte es conocido como el planeta rojo?",
-    options: ["Por su agua", "Por el óxido de hierro", "Por volcanes activos", "Por su atmósfera azul"],
-    correct: 1,
-    fact: "El polvo rico en óxido de hierro (herrumbre) le da el color rojizo."
-  },
-  {
-    q: "¿Cuánto dura aproximadamente un día en Marte (un sol)?",
-    options: ["12 horas", "24 horas", "24h 39m", "30 horas"],
-    correct: 2,
-    fact: "Un 'sol' dura ~24 horas y 39 minutos."
-  },
-  {
-    q: "¿Qué rover aterrizó en Marte en 2021?",
-    options: ["Spirit", "Curiosity", "Perseverance", "Sojourner"],
-    correct: 2,
-    fact: "Perseverance llegó en 2021 para buscar señales de vida pasada."
-  },
-  {
-    q: "¿Cuál es el volcán más grande del Sistema Solar, en Marte?",
-    options: ["Olympus Mons", "Mauna Kea", "Etna", "Vesubio"],
-    correct: 0,
-    fact: "Olympus Mons es gigantesco comparado con volcanes terrestres."
-  }
-];
-
-class BootScene extends Phaser.Scene {
-  constructor() { super("boot"); }
-  create() {
-    this.cameras.main.setBackgroundColor("#0b1d3a");
-
-    const { width, height } = this.scale;
-    this.add.text(width/2, height/2 - 80, "Explora Marte 🚀", {
-      fontFamily: "Arial",
-      fontSize: "48px",
-      color: "#ffffff",
-      fontStyle: "bold"
-    }).setOrigin(0.5);
-
-    this.add.text(width/2, height/2 - 20, "Responde y aprende datos del planeta rojo", {
-      fontFamily: "Arial",
-      fontSize: "18px",
-      color: "#cfe3ff"
-    }).setOrigin(0.5);
-
-    const btn = this.add.rectangle(width/2, height/2 + 60, 260, 56, 0xff6a00)
-      .setInteractive({ useHandCursor: true });
-
-    this.add.text(width/2, height/2 + 60, "COMENZAR", {
-      fontFamily: "Arial",
-      fontSize: "20px",
-      color: "#1b0c00",
-      fontStyle: "bold"
-    }).setOrigin(0.5);
-
-    btn.on("pointerdown", () => this.scene.start("quiz"));
-  }
-}
-
-class QuizScene extends Phaser.Scene {
-  constructor() { super("quiz"); }
-
-  init() {
-    this.index = 0;
-    this.score = 0;
-    this.locked = false;
+class MarsPlatformer extends Phaser.Scene {
+  constructor() {
+    super('mars-platformer');
   }
 
   create() {
-    this.cameras.main.setBackgroundColor("#08162c");
-    const { width, height } = this.scale;
+    // ----- Mundo grande
+    this.WORLD_W = 5200;
+    this.WORLD_H = 1800;
 
-    // HUD
-    this.scoreText = this.add.text(20, 18, "Puntaje: 0", { fontFamily:"Arial", fontSize:"18px", color:"#ffffff" });
-    this.progressText = this.add.text(width - 20, 18, "", { fontFamily:"Arial", fontSize:"18px", color:"#cfe3ff" }).setOrigin(1, 0);
+    // Fondo base
+    this.cameras.main.setBackgroundColor('#0b1d3a');
 
-    // Card
-    this.card = this.add.rectangle(width/2, height/2, Math.min(760, width - 40), 420, 0x0f2a52, 0.95);
-    this.card.setStrokeStyle(2, 0x1d4d8f, 1);
+    // Texturas procedurales (no necesitas PNG para arrancar)
+    this.createProceduralTextures();
 
-    this.questionText = this.add.text(width/2, height/2 - 150, "", {
-      fontFamily: "Arial",
-      fontSize: "24px",
-      color: "#ffffff",
-      wordWrap: { width: Math.min(700, width - 80) },
-      align: "center"
-    }).setOrigin(0.5);
+    // Bounds de cámara y físicas (clave para mapa grande)
+    this.cameras.main.setBounds(0, 0, this.WORLD_W, this.WORLD_H);
+    this.physics.world.setBounds(0, 0, this.WORLD_W, this.WORLD_H);
 
-    // Feedback
-    this.feedbackText = this.add.text(width/2, height/2 + 120, "", {
-      fontFamily:"Arial", fontSize:"16px", color:"#cfe3ff",
-      wordWrap: { width: Math.min(700, width - 80) },
-      align: "center"
-    }).setOrigin(0.5);
+    // ----- Fondo con parallax (tileSprite)
+    // Se estira al tamaño del mundo; scrollFactor pequeño para efecto profundidad
+    this.bg = this.add.tileSprite(0, 0, this.WORLD_W, this.WORLD_H, 'marsSky')
+      .setOrigin(0, 0)
+      .setScrollFactor(0.2);
 
-    // Buttons container
-    this.answerButtons = [];
+    // ----- Grupo de plataformas estáticas
+    this.platforms = this.physics.add.staticGroup();
 
-    this.renderQuestion();
-  }
-
-  renderQuestion() {
-    this.locked = false;
-    this.feedbackText.setText("");
-
-    const { width, height } = this.scale;
-    const total = QUESTIONS.length;
-    const qObj = QUESTIONS[this.index];
-
-    this.progressText.setText(`Pregunta ${this.index + 1} / ${total}`);
-    this.questionText.setText(qObj.q);
-
-    // limpiar botones previos
-    this.answerButtons.forEach(b => b.destroy());
-    this.answerButtons = [];
-
-    const startY = height/2 - 60;
-    const gap = 64;
-
-    qObj.options.forEach((opt, i) => {
-      const y = startY + i * gap;
-
-      const btnBg = this.add.rectangle(width/2, y, Math.min(680, width - 80), 48, 0x173a70, 1)
-        .setInteractive({ useHandCursor: true });
-
-      btnBg.setStrokeStyle(2, 0x2e6bc2, 1);
-
-      const btnText = this.add.text(width/2, y, opt, {
-        fontFamily: "Arial",
-        fontSize: "18px",
-        color: "#ffffff"
-      }).setOrigin(0.5);
-
-      btnBg.on("pointerover", () => btnBg.setFillStyle(0x1f4b8f, 1));
-      btnBg.on("pointerout", () => {
-        if (!this.locked) btnBg.setFillStyle(0x173a70, 1);
-      });
-
-      btnBg.on("pointerdown", () => this.pickAnswer(i, btnBg));
-
-      this.answerButtons.push(btnBg, btnText);
-    });
-  }
-
-  pickAnswer(i, btnBg) {
-    if (this.locked) return;
-    this.locked = true;
-
-    const qObj = QUESTIONS[this.index];
-    const correct = (i === qObj.correct);
-
-    if (correct) {
-      this.score += 10;
-      this.scoreText.setText(`Puntaje: ${this.score}`);
-      btnBg.setFillStyle(0x1f8f3a, 1);
-      this.feedbackText.setText(`✅ Correcto. ${qObj.fact}`);
-    } else {
-      btnBg.setFillStyle(0x9b1c1c, 1);
-      this.feedbackText.setText(`❌ Incorrecto. ${qObj.fact}`);
+    // Suelo (segmentado para eficiencia)
+    const groundY = this.WORLD_H - 80;
+    for (let x = 0; x < this.WORLD_W; x += 256) {
+      const g = this.platforms.create(x, groundY, 'ground');
+      g.setOrigin(0, 0.5);
+      g.refreshBody();
     }
 
-    // pasar a siguiente
-    this.time.delayedCall(1200, () => {
-      this.index++;
-      if (this.index < QUESTIONS.length) {
-        this.renderQuestion();
-      } else {
-        this.scene.start("end", { score: this.score, total: QUESTIONS.length });
-      }
+    // Plataformas flotantes (coordenadas estilo Mario)
+    const ledges = [
+      { x: 450,  y: groundY - 220 },
+      { x: 820,  y: groundY - 360 },
+      { x: 1200, y: groundY - 280 },
+      { x: 1650, y: groundY - 420 },
+      { x: 2050, y: groundY - 320 },
+      { x: 2500, y: groundY - 240 },
+      { x: 2950, y: groundY - 380 },
+      { x: 3400, y: groundY - 260 },
+      { x: 3850, y: groundY - 420 },
+      { x: 4300, y: groundY - 320 },
+      { x: 4700, y: groundY - 260 },
+    ];
+
+    ledges.forEach(p => {
+      const ledge = this.platforms.create(p.x, p.y, 'platform');
+      ledge.refreshBody();
     });
+
+    // Obstáculos (rocas) - también estáticos
+    this.rocks = this.physics.add.staticGroup();
+    for (let i = 0; i < 34; i++) {
+      const rx = Phaser.Math.Between(300, this.WORLD_W - 200);
+      const ry = groundY - Phaser.Math.Between(0, 10);
+      const rock = this.rocks.create(rx, ry, 'rock');
+      rock.setScale(Phaser.Math.FloatBetween(0.8, 1.4));
+      rock.refreshBody();
+    }
+
+    // ----- Jugador (física Arcade)
+    this.player = this.physics.add.sprite(140, groundY - 120, 'astronaut');
+    this.player.setBounce(0.05);
+    this.player.setCollideWorldBounds(true);
+
+    // Ajustes de movimiento
+    this.playerSpeed = 240;
+    this.jumpSpeed = 520;
+
+    // Gravedad (tipo plataforma)
+    this.player.body.setGravityY(900);
+
+    // Colisiones
+    this.physics.add.collider(this.player, this.platforms);
+    this.physics.add.collider(this.player, this.rocks);
+
+    // ----- Cámara sigue al jugador
+    this.cameras.main.startFollow(this.player, true, 0.08, 0.08);
+    this.cameras.main.setZoom(1.0);
+
+    // ----- Controles teclado
+    this.cursors = this.input.keyboard.createCursorKeys();
+
+    // ----- HUD fijo (no se mueve con la cámara)
+    this.hud = this.add.text(16, 16, '', {
+      fontFamily: 'Arial',
+      fontSize: '16px',
+      color: '#ffffff'
+    }).setScrollFactor(0);
+
+    this.help = this.add.text(16, 38, '← → mover | ↑ saltar | Explora el mapa marciano', {
+      fontFamily: 'Arial',
+      fontSize: '16px',
+      color: '#cfe3ff'
+    }).setScrollFactor(0);
+
+    // Meta simple (bandera) al final
+    this.goal = this.physics.add.staticSprite(this.WORLD_W - 180, groundY - 140, 'flag');
+    this.goal.setDepth(2);
+
+    this.physics.add.overlap(this.player, this.goal, () => {
+      this.win();
+    }, null, this);
+
+    this.won = false;
+  }
+
+  update() {
+    if (this.won) return;
+
+    // Movimiento lateral
+    if (this.cursors.left.isDown) {
+      this.player.setVelocityX(-this.playerSpeed);
+      this.player.setFlipX(true);
+    } else if (this.cursors.right.isDown) {
+      this.player.setVelocityX(this.playerSpeed);
+      this.player.setFlipX(false);
+    } else {
+      this.player.setVelocityX(0);
+    }
+
+    // Salto (solo si está tocando el suelo / plataforma)
+    const onGround = this.player.body.blocked.down || this.player.body.touching.down;
+    if (this.cursors.up.isDown && onGround) {
+      this.player.setVelocityY(-this.jumpSpeed);
+    }
+
+    // Parallax: mueve el tile del fondo según scroll de cámara
+    this.bg.tilePositionX = this.cameras.main.scrollX * 0.2;
+    this.bg.tilePositionY = this.cameras.main.scrollY * 0.2;
+
+    // HUD
+    this.hud.setText(
+      `X: ${this.player.x.toFixed(0)}  Y: ${this.player.y.toFixed(0)}  VelX: ${this.player.body.velocity.x.toFixed(0)}`
+    );
+
+    // Caída fuera del mundo (reinicio)
+    if (this.player.y > this.WORLD_H + 200) {
+      this.scene.restart();
+    }
+  }
+
+  win() {
+    if (this.won) return;
+    this.won = true;
+
+    // Congelar movimiento
+    this.player.setVelocity(0, 0);
+    this.player.body.enable = false;
+
+    const msg = this.add.text(this.scale.width / 2, this.scale.height / 2,
+      '¡Llegaste a la meta! 🏁\n(Recarga para jugar de nuevo)', {
+        fontFamily: 'Arial',
+        fontSize: '32px',
+        color: '#ffffff',
+        align: 'center',
+        backgroundColor: 'rgba(0,0,0,0.35)',
+        padding: { x: 16, y: 12 }
+      }
+    ).setOrigin(0.5).setScrollFactor(0);
+
+    // Efecto cámara
+    this.cameras.main.flash(250, 255, 106, 0);
+  }
+
+  createProceduralTextures() {
+    // Usamos Graphics para generar texturas simples (placeholder)
+    const g = this.make.graphics({ x: 0, y: 0, add: false });
+
+    // --- Fondo "cielo" marciano (tile)
+    g.fillStyle(0x071428, 1);
+    g.fillRect(0, 0, 128, 128);
+
+    // estrellas / polvo
+    for (let i = 0; i < 120; i++) {
+      const x = Phaser.Math.Between(0, 127);
+      const y = Phaser.Math.Between(0, 127);
+      const c = Phaser.Math.Between(0x1a2d52, 0x2a3f6f);
+      g.fillStyle(c, 1);
+      g.fillRect(x, y, 2, 2);
+    }
+
+    // neblina rojiza
+    g.fillStyle(0x3a140e, 0.35);
+    g.fillCircle(32, 90, 34);
+    g.fillCircle(92, 70, 42);
+
+    g.generateTexture('marsSky', 128, 128);
+    g.clear();
+
+    // --- Suelo (256x64)
+    g.fillStyle(0x7a3a1c, 1);
+    g.fillRect(0, 0, 256, 64);
+
+    // textura arenosa
+    for (let i = 0; i < 220; i++) {
+      const x = Phaser.Math.Between(0, 255);
+      const y = Phaser.Math.Between(0, 63);
+      const c = Phaser.Math.Between(0x6b3117, 0x8b4a26);
+      g.fillStyle(c, 1);
+      g.fillRect(x, y, 2, 2);
+    }
+
+    // borde superior más oscuro
+    g.fillStyle(0x4e2412, 1);
+    g.fillRect(0, 0, 256, 8);
+
+    g.generateTexture('ground', 256, 64);
+    g.clear();
+
+    // --- Plataforma (160x28)
+    g.fillStyle(0x5b2a15, 1);
+    g.fillRoundedRect(0, 0, 160, 28, 10);
+    g.fillStyle(0x3f1d10, 1);
+    g.fillRoundedRect(0, 0, 160, 6, 6);
+    g.generateTexture('platform', 160, 28);
+    g.clear();
+
+    // --- Roca (44x34)
+    g.fillStyle(0x2c1c16, 1);
+    g.fillRoundedRect(2, 6, 40, 24, 10);
+    g.fillStyle(0x3b2a22, 1);
+    g.fillRoundedRect(12, 12, 16, 10, 6);
+    g.generateTexture('rock', 44, 34);
+    g.clear();
+
+    // --- Astronauta (32x40)
+    g.fillStyle(0xeaeaea, 1);
+    g.fillRoundedRect(6, 6, 20, 26, 8);   // cuerpo
+
+    g.fillStyle(0x2d7dd2, 1);
+    g.fillRoundedRect(10, 10, 12, 10, 4); // visor
+
+    g.fillStyle(0xff6a00, 1);
+    g.fillRect(14, 24, 4, 6);            // detalle
+
+    // botas
+    g.fillStyle(0xbdbdbd, 1);
+    g.fillRect(8, 32, 7, 6);
+    g.fillRect(17, 32, 7, 6);
+
+    g.generateTexture('astronaut', 32, 40);
+    g.clear();
+
+    // --- Bandera meta (24x80)
+    g.fillStyle(0xffffff, 1);
+    g.fillRect(10, 0, 4, 80);             // poste
+    g.fillStyle(0xff6a00, 1);
+    g.fillTriangle(14, 10, 24, 16, 14, 24); // banderín
+    g.generateTexture('flag', 24, 80);
+
+    g.destroy();
   }
 }
 
-class EndScene extends Phaser.Scene {
-  constructor() { super("end"); }
-
-  init(data) {
-    this.finalScore = data.score || 0;
-    this.total = data.total || 0;
-  }
-
-  create() {
-    this.cameras.main.setBackgroundColor("#0b1d3a");
-    const { width, height } = this.scale;
-
-    this.add.text(width/2, height/2 - 120, "Misión completada 🛰️", {
-      fontFamily:"Arial", fontSize:"44px", color:"#ffffff", fontStyle:"bold"
-    }).setOrigin(0.5);
-
-    this.add.text(width/2, height/2 - 40, `Puntaje final: ${this.finalScore} / ${this.total * 10}`, {
-      fontFamily:"Arial", fontSize:"22px", color:"#cfe3ff"
-    }).setOrigin(0.5);
-
-    this.add.text(width/2, height/2 + 10,
-      "Tip: agrega más preguntas, niveles y una barra de progreso para hacerlo más adictivo 😉",
-      { fontFamily:"Arial", fontSize:"16px", color:"#cfe3ff", align:"center",
-        wordWrap:{ width: Math.min(700, width - 80) } }
-    ).setOrigin(0.5);
-
-    const btn = this.add.rectangle(width/2, height/2 + 90, 280, 56, 0xff6a00)
-      .setInteractive({ useHandCursor: true });
-
-    this.add.text(width/2, height/2 + 90, "JUGAR DE NUEVO", {
-      fontFamily: "Arial", fontSize: "20px", color: "#1b0c00", fontStyle:"bold"
-    }).setOrigin(0.5);
-
-    btn.on("pointerdown", () => this.scene.start("boot"));
-  }
-}
-
+// Configuración Phaser: Arcade Physics
 const config = {
   type: Phaser.AUTO,
   width: 900,
   height: 600,
-  parent: "game",
-  backgroundColor: "#0b1d3a",
+  parent: 'game',
+  physics: {
+    default: 'arcade',
+    arcade: {
+      debug: false
+    }
+  },
   scale: {
     mode: Phaser.Scale.FIT,
     autoCenter: Phaser.Scale.CENTER_BOTH
   },
-  scene: [BootScene, QuizScene, EndScene]
+  scene: [MarsPlatformer]
 };
 
 new Phaser.Game(config);
